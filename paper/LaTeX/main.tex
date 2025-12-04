@@ -1,0 +1,45 @@
+\documentclass[a4paper]{article}
+
+\usepackage{INTERSPEECH2021}
+\usepackage{subfiles}
+\usepackage{datatool}
+\usepackage{fmtcount}
+\usepackage{xstring}
+\usepackage{substr} % Include this in your preamble
+\usepackage{tipa}
+\usepackage{hyperref}
+\setlength{\parskip}{0pt}
+\DTLloaddb{cronbach}{scripts/data_output/cronbach_alpha.csv}
+\DTLloaddb{modelsouts}{scripts/data_output/dynamic_models.csv}
+\DTLloaddb{partrem}{scripts/data_output/participant_removal.csv}
+\DTLloaddb{taskrem}{scripts/data_output/taskremoval.csv}
+\DTLloaddb{age}{scripts/data_output/age.csv}
+
+
+\newcommand{\livedata}[2]{%
+    \DTLfetch{#1}{Statistic}{#2}{Value}%
+}
+
+\title{Prosodic Cue Integration in Native and L2 Word Recognition: An Incremental Activation Model}
+%Paper submission must be anonymous. Only fill in author information for the final PDF.
+\name{Adam A. Bramlett$^1$}
+%The maximum number of authors in the author list is twenty. If the number of contributing authors is more than twenty, they should be listed in a footnote or in acknowledgement section, as appropriate.
+\address{
+  Carnegie Mellon University}
+\email{$^1$abramlet@andrew.cmu.edu
+
+\begin{document}
+
+\maketitle
+% 
+\subfile{paper/LaTeX/1.abstract}
+\subfile{paper/LaTeX/2.introduction}
+\subfile{paper/LaTeX/3.methods}
+\subfile{paper/LaTeX/4.results}
+\subfile{paper/LaTeX/5.discussion}
+\subfile{paper/LaTeX/6.conclusion}
+
+
+\bibliographystyle{IEEEtran}
+\bibliography{my_references.bib}
+\end{document}

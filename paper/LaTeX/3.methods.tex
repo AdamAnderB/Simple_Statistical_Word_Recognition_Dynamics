@@ -1,0 +1,65 @@
+
+\section{Methods}
+
+\subsection{Participants}
+ The recruitment of \livedata{partrem}{starting_participants} L1 English speakers was managed through Prolific \cite{Palan_2018} (n=\livedata{partrem}{data_exp_142778-v2.before}) and in-person (n=33) recruitment. An additional 27 potential participants were rejected due to failing initial requirements (i.e., five removed for not being L1 English speakers, eight removed for failed headphone-checks \cite{milne_2021}, and 14 removed for failed web-camera-checks). We define an L1 English speaker as one who both self-identified as English dominant and acquired English as their first language \cite{Brown_Tusmagambet_Rahming_Tu_DeSalvo_Wiener_2023}. To ensure data quality and maximize retained participants, three median absolute deviations (MAD) from median score was calculated as the standard for removal for each task \cite{Leys_2013}. Of the \livedata{partrem}{starting_participants} participants who remained, \livedata{partrem}{removed_participants} were removed for low accuracy scores. Of these, \livedata{taskrem}{particip_remove_lang.remove} were removed for being below MAD range in the language tasks and \livedata{taskrem}{rhythm_part.remove} for low performance in the rhythm auditory-motor integration task.  After removal, \livedata{partrem}{kept_participants} participants' (age: $\mu$ = \livedata{age}{mean_age}, $\sigma$ = \livedata{age}{sd_age}) data were retained for analysis. 
+
+\subsection{Procedure}
+All experiments, R scripts, and data are available via the Open Science Framework: \url{https://osf.io/bsph6/?view_only=dac11cc3362f419491681fd3364e4da0}. Participants took part in a battery of language, music, and domain general tasks using the online experiment builder Gorilla \cite{gorilla_Anwyl-Irvine_2019}. Participants first completed a two-part headphone check (basic aural attention task and dichotic-pitch task) \cite{milne_2021}, followed by an eight trial adaptive staircase digit-span task. Next, participants took part in either the music or language segments (order counterbalanced), followed by the complementary segment (i.e., music $\rightarrow$ language, language $\rightarrow$ music). In the language segment, participants took part in three speeded AX-discrimination tasks for Italian, Japanese, and Mandarin (trials automatically proceeded after 1000 ms). All language stimuli were sampled at 44.1 kHz and recorded in sound attenuated booths (Mandarin) or a studio (Japanese and Italian). The Italian and Japanese stimuli and design were taken from \cite{Tsukada_Cox_Hajek_Hirata_2017}, and consisted of stop geminate contrasts: Italian - /\textipa{p t k b d g dZ}/, Japanese - /\textipa{t k tS}/. For the Italian AX task, stimuli consisted of 27 pairs of geminate contrasts (e.g., non-geminate /\textipa{Eko}/ \textit{echo}, geminate /\textipa{Ek\textlengthmark o}/ \textit{here}), which were made up of approximately half real and non-real words, spoken by three native speakers (balanced across position and real/non-word co-occurrence). For the Japanese AX task, stimuli consisted of 33 pairs of geminate contrasts, with approximately half of the geminate and non-geminate pairs matching in pitch-accent (e.g., non-geminate low-high pitch-accent /heta/ \textit{unskilled}, geminate low-high pitch-accent /het:a/ \textit{decreased}) and mismatching in pitch-accent (e.g., non-geminate high-low pitch-accent /kate/ \textit{win}, geminate low-high pitch-accent /kat:e/ \textit{buying}). The Mandarin stimuli and design were taken from \cite{Wiener_Bradley_2020}, and consisted of eight stimuli of the syllable yu with four tones (yu1, yu2, yu3, yu4) recorded by male and female native speakers. The F0 contours were manipulated using \cite{Boersma_Weenink}. Each tonal pairing co-occurred equal amounts. That is, each tone occurred with itself three times to equalize match-mismatch answers across the task. In total, there were 52 Italian trials, 66 Japanese trials, and 96 Mandarin trials. In the Italian task, an error led to two pairs only appearing once, which is why there are 52 trials.
+
+The music segment had two basic tasks: auditory-motor temporal integration \cite{Kachlicka_Saito_Tierney_2019} and auditory discrimination \cite[Musical Ear Task]{Wallentin_Nielsen_Friis-Olivarius_Vuust_Vuust_2010}, both of which contained melody and rhythm sections. In the auditory-motor integration tasks, participants heard a rhythm (auditory-motor rhythm) or melody (auditory-motor melody) three times and had to reproduce either the melodic or rhythmic phrase. For example, in the auditory-motor rhythm task each trial played a rhythm three times, with 13 possible beat positions. The participant then needed to repeat the exact beat using the space-bar. Timing was captured on each space-bar press. Similarly, for the auditory-motor melody task a series of seven notes were played. The participant then needed to repeat these with a series of on-screen buttons that corresponded to relative pitches (the melody always started with the middle pitch). After completion of both auditory-motor temporal integration tasks, the participant then completed a rhythm and melody Musical Ear Task. \cite{Wallentin_Nielsen_Friis-Olivarius_Vuust_Vuust_2010}, where two auditory music samples (melody or rhythm) were played and then the participant had to determine if the samples were identical (melodies or drum beats) through a button press on the screen. 
+
+After completing the music and language segments, participants then filled out a musical sophistication survey \cite[Goldsmiths-MSI]{Müllensiefen_Gingras_Musil_Stewart_2014}. The Goldsmiths-MSI is a self-reported survey, which aims to capture individual differences through musical sophistication in five areas: Active Musical Engagement (e.g., time and money resources spent on music); Self-reported Perceptual Abilities (e.g., musical listening skills); Musical Training (e.g. formal musical training); Self-reported Singing Abilities (e.g. one’s own singing); Emotional Engagement with Music (e.g. ability to talk about emotions in music). 
+
+\subsection{Data analysis}
+\subsubsection{Data wrangling and validation}
+
+
+For reaction time data, the log transformed overall trial reaction time for both the Musical Ear Tasks (rhythm and melody) was calculated. Reaction time trial data outside three median absolute deviations was removed (proportion of trials removed from musical ear tasks: \livedata{taskrem}{RTmet.remove} of \livedata{taskrem}{RTmet.before} trials). Language tasks reaction time were square-root transformed, but no trial data were removed due to the automatic progression of trials at 1000ms.
+
+For accuracy data, a by-item analysis for both Musical Ear Tasks and for each language task was carried out following the same median absolute deviation approach. Retained items by task: Auditory-motor melody items \livedata{taskrem}{melody_item.after}/\livedata{taskrem}{melody_item.before}, Auditory-motor rhythm items \livedata{taskrem}{rhythm_item.after}/\livedata{taskrem}{rhythm_item.before}, Mandarin items \livedata{taskrem}{Mandarin.after}/\livedata{taskrem}{Mandarin.before}, Italian items 24/27, Japanese items 30/33. Additionally in the auditory-motor rhythm task, the first beat of every trial (rhythmic phrase) was removed. This was done because the first beat initiates rhythm capture. As each possible beat is 200 ms apart, the second beat of each rhythmic phrase was then centered by subtracting 100 ms, as seen in Figure \ref{fig:beat_data}. After data removal, internal reliability of the items was calculated for each of the musical tasks and questionnaire as tested in the original studies (i.e., Goldsmiths 5 area scores, \textit{Musical Ear Task} melody and rhythm items, auditory-motor melody, auditory-motor rhythm). Table~\ref{tab:comparison} presents Cronbach's alpha values. 
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{SP_24_visuals/Correct_and_Incorrect_distrubutions_by_beat_across_trial.pdf}
+  \caption{Distribution of beats hit (space bar) over trials. Time frames for each beat (2-13) is illustrated by horizontal lines. No-beat distributions represent \cite{gorilla_Anwyl-Irvine_2019}'s measurement sensitivity.}
+  \label{fig:beat_data}
+\end{figure}
+
+For both Musical Ear tasks and language tasks, d-prime was calculated as a measure of sensitivity \cite{Macmillan_Creelman_2004}. For both auditory motor tasks, accuracy was calculated by averaging the percent of beats (rhythm) or pitches (melody) correct on each trial.
+
+
+\setlength{\abovedisplayskip}{-10pt}
+\setlength{\belowdisplayskip}{-10pt}
+\setlength{\abovetopsep}{-10pt}
+\setlength{\belowbottomsep}{-10pt}
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Task} & \textbf{Reported $\alpha$}& \textbf{Our $\alpha$} \\
+\hline
+GoldSmiths \cite{Müllensiefen_Gingras_Musil_Stewart_2014} & Range: 0.79 - 0.93 & 0.89 \\
+Musical Ear tasks \cite{Wallentin_Nielsen_Friis-Olivarius_Vuust_Vuust_2010}& 0.87 & 0.79 \\
+Auditory-motor melody \cite{Kachlicka_Saito_Tierney_2019}& Unreported & 0.93 \\
+Auditory-motor rhythm\cite{Kachlicka_Saito_Tierney_2019}& Unreported & 0.91 \\
+\hline
+\end{tabular}
+\caption{Task reported Cronbach's alpha values and our Cronbach's alpha values}
+\label{tab:comparison}
+\end{table}
+
+%\vspace{-\baselineskip}
+
+\subsubsection{Statistical analysis}
+
+All quantitative variables from each of the tasks were centered on their mean to 0 and scaled across tasks, as seen in Figure \ref{fig:centered_data}. The Goldsmiths General scores were discretized into categories based on three ranges, where score is: \text{Basic: } $< 36.1,$ \quad \text{Average:} \geq $ 36.1$ \text{ and $< 51.4,$}\quad \text{Higher than average:} \geq 51.4 \cite{Müllensiefen_Gingras_Musil_Stewart_2014}. 
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=.9\textwidth]{SP_24_visuals/by_gs.pdf}
+  \caption{Raw data}
+  \label{fig:centered_data}
+\end{figure*}
+
+To answer our three research questions, three multiple linear regression models (one per language) were built to compare the relative contribution of each task on centered and scaled d-prime scores of each language. Maximal models were built using the \textit{lm} package \cite{lmPackage} in R \cite{RManual}. Each model included 10 predictor effects: Goldsmiths engagement, Goldsmiths perception, Goldsmiths training, Goldsmiths singing, Goldsmiths emotions, Musical Ear Test d' Melody, Musical Ear Test d' Rhythm, Working-memory, Auditory-motor Rhythm, Auditory-motor Melody. Models were reduced in the following order: removal of non theoretical driven music skill (e.g., rhythm for Mandarin and Melody for Italian and Japanese), then effects were removed based on how much variance was explained in terms of coefficients and post hoc colinearity checks. The Japanese model was reduced minimally due to finding early evidence of parsimonious models. For Italian and Mandarin, the models were reduced to single variables for each theoretically driven question (e.g., music skill, music background) to achieve parsimony and reduce un-needed complexity. 
