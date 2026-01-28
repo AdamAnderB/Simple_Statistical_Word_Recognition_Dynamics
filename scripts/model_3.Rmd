@@ -1,0 +1,2022 @@
+---
+title: "model3"
+author: "Adam A. Bramlett"
+date: "2025-12-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tibble)
+library(purrr)
+library(dplyr)
+library(ggplot2)
+```
+
+
+
+```{r}
+# ============================
+# Block A: Lexical structures
+# ============================
+
+# A single lexical item (word / object being recognized)
+# - id: internal ID (e.g. "BEAKER", "MA_HIGH")
+# - label: surface form (e.g. "beaker", "mā")
+# - language: "english", "mandarin", "italian", etc.
+# - semantics: arbitrary list (meaning features, gloss, whatever you want)
+# - cues: named list of numeric vectors, each over time
+#         e.g. list(F0 = c(200, 200, 180), DUR = c(80, 90, 100))
+#         all cue vectors should be the same length (T)
+make_lex_item <- function(
+  id,
+  label,
+  language,
+  semantics = list(),
+  cues = list()
+) {
+  if (!is.character(id) || length(id) != 1L) {
+    stop("`id` must be a single string.")
+  }
+  if (!is.character(label) || length(label) != 1L) {
+    stop("`label` must be a single string.")
+  }
+  if (!is.character(language) || length(language) != 1L) {
+    stop("`language` must be a single string.")
+  }
+  if (!is.list(semantics)) {
+    stop("`semantics` must be a list (can be empty).")
+  }
+  if (!is.list(cues)) {
+    stop("`cues` must be a named list of numeric vectors (can be empty).")
+  }
+  if (length(cues) > 0) {
+    if (is.null(names(cues)) || any(names(cues) == "")) {
+      stop("All elements of `cues` must be named (e.g., 'F0', 'DUR').")
+    }
+    cue_lengths <- vapply(cues, length, integer(1))
+    if (length(unique(cue_lengths)) != 1L) {
+      stop("All cue vectors in `cues` must have the same length (same number of time steps).")
+    }
+  }
+
+  out <- list(
+    id        = id,
+    label     = label,
+    language  = language,
+    semantics = semantics,
+    cues      = cues
+  )
+
+  class(out) <- c("lex_item", class(out))
+  out
+}
+
+# Convenience: number of time steps for an item (0 if no cues yet)
+lex_item_time_steps <- function(item) {
+  stopifnot(inherits(item, "lex_item"))
+  if (length(item$cues) == 0L) return(0L)
+  length(item$cues[[1]])
+}
+
+# Pretty-print for lex_item
+print.lex_item <- function(x, ...) {
+  cat("<lex_item>\n")
+  cat("  id       :", x$id, "\n")
+  cat("  label    :", x$label, "\n")
+  cat("  language :", x$language, "\n")
+  cat("  semantics:", if (length(x$semantics) == 0) " (none)\n" else " (list)\n")
+  cue_names <- names(x$cues)
+  if (length(cue_names) == 0L) {
+    cat("  cues     : none\n")
+  } else {
+    T <- length(x$cues[[1]])
+    cat("  cues     :", paste(cue_names, collapse = ", "),
+        sprintf("(T = %d)\n", T))
+  }
+  invisible(x)
+}
+
+
+# A lexicon: collection of lexical items
+# - items: list of lex_item objects
+# - language: optional overall language tag (can be NULL if mixed)
+# - name: optional lexicon name (e.g. "english_segmental_demo")
+make_lexicon <- function(items, language = NULL, name = NULL) {
+  if (!is.list(items) || length(items) == 0L) {
+    stop("`items` must be a non-empty list of lex_item objects.")
+  }
+  # check all are lex_item
+  if (any(!vapply(items, inherits, logical(1), what = "lex_item"))) {
+    stop("All elements of `items` must have class 'lex_item'.")
+  }
+
+  # derive language if not provided (only if unique)
+  if (is.null(language)) {
+    langs <- vapply(items, function(x) x$language, character(1))
+    if (length(unique(langs)) == 1L) {
+      language <- unique(langs)
+    } else {
+      language <- NA_character_  # mixed languages possible
+    }
+  }
+
+  # ensure unique IDs
+  ids <- vapply(items, function(x) x$id, character(1))
+  if (anyDuplicated(ids)) {
+    stop("Duplicate item IDs in lexicon: ", paste(unique(ids[duplicated(ids)]), collapse = ", "))
+  }
+
+  out <- list(
+    items    = stats::setNames(items, ids),
+    language = language,
+    name     = name %||% "lexicon"
+  )
+
+  class(out) <- c("lexicon", class(out))
+  out
+}
+
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+# Helper: number of time steps in a lexicon
+# (requires all items with cues to have same T; returns 0 if none have cues)
+lexicon_time_steps <- function(lex) {
+  stopifnot(inherits(lex, "lexicon"))
+  Ts <- vapply(lex$items, lex_item_time_steps, integer(1))
+  Ts <- Ts[Ts > 0]
+  if (length(Ts) == 0L) return(0L)
+  if (length(unique(Ts)) != 1L) {
+    stop("Items in lexicon have different numbers of time steps.")
+  }
+  Ts[1]
+}
+
+# Pretty-print lexicon
+print.lexicon <- function(x, ...) {
+  cat("<lexicon>\n")
+  cat("  name     :", x$name, "\n")
+  cat("  language :", if (is.na(x$language)) "mixed" else x$language, "\n")
+  cat("  n_items  :", length(x$items), "\n")
+  T <- lexicon_time_steps(x)
+  if (T > 0L) {
+    cat("  time     : T =", T, "steps\n")
+  } else {
+    cat("  time     : (no cues yet)\n")
+  }
+  invisible(x)
+}
+```
+
+```{r}
+# Convert a lexicon to a long data frame:
+# columns: item_id, label, language, time, cue, value
+lexicon_to_long <- function(lex) {
+  stopifnot(inherits(lex, "lexicon"))
+
+  # we'll use base R to avoid extra dependencies, but you can swap to tibble/dplyr
+  out_list <- lapply(lex$items, function(item) {
+    T <- lex_item_time_steps(item)
+    if (T == 0L) {
+      return(NULL)
+    }
+    cue_names <- names(item$cues)
+    time_vec <- seq_len(T)
+
+    # build rows for each cue
+    rows <- lapply(cue_names, function(cn) {
+      values <- item$cues[[cn]]
+      data.frame(
+        item_id  = item$id,
+        label    = item$label,
+        language = item$language,
+        time     = time_vec,
+        cue      = cn,
+        value    = as.numeric(values),
+        stringsAsFactors = FALSE
+      )
+    })
+    do.call(rbind, rows)
+  })
+
+  out <- do.call(rbind, out_list)
+  rownames(out) <- NULL
+  out
+}
+```
+
+```{r}
+
+# =====================================
+# Block B: Language-specific lexicons
+# =====================================
+
+# Convenience dispatcher (for your simulations later)
+make_demo_lexicon <- function(language = c("english", "mandarin", "italian"),
+                              version  = "default") {
+  language <- match.arg(language)
+  switch(
+    language,
+    "english"  = make_lexicon_english(version = version),
+    "mandarin" = make_lexicon_mandarin(version = version),
+    "italian"  = make_lexicon_italian(version = version)
+  )
+}
+
+# -----------------------------
+# B1. English: cohort-style lexicon
+# -----------------------------
+# Version "cohort_demo": simple ONSET–VOWEL–CODA structure
+#
+# Cues:
+# - ONSET_CONT   : degree of frication / continuancy (continuous)
+# - VOWEL_FRONT  : front-back position (0 = back, 1 = front)
+# - CODA_VOICED  : voicing of coda (0 or 1, but kept numeric)
+#
+# Time steps T = 3:
+#   t1: onset available       (ONSET_CONT)
+#   t2: onset + vowel         (ONSET_CONT, VOWEL_FRONT)
+#   t3: onset + vowel + coda  (ONSET_CONT, VOWEL_FRONT, CODA_VOICED)
+make_lexicon_english <- function(version = c("default", "cohort_demo")) {
+  version <- match.arg(version)
+
+  if (version == "default" || version == "cohort_demo") {
+    T <- 3L  # 3 incremental segments / windows
+
+    # We code a single SEG cue that unfolds over time.
+    # beaker / beetle / speaker start highly similar (cohort),
+    # carriage is an outlier from the beginning.
+
+    # SEG values are arbitrary but structured:
+    #
+    #  time 1: beaker, beetle, speaker all the same (strong cohort)
+    #          carriage already somewhat different
+    #  time 2: still mostly overlapping for the cohort set
+    #  time 3: divergence among beaker / beetle / speaker
+    #          (carriage remains distinct throughout)
+
+    seg_beaker  <- c(0.6, 0.7, 0.8)
+    seg_speaker <- c(0.2, 0.7, 0.8)
+    seg_beetle  <- c(0.6, 0.7, 0.4)
+    seg_carriage <- c(0.2, 0.3, 0.6)
+
+    beaker <- make_lex_item(
+      id       = "BEAKER",
+      label    = "beaker",
+      language = "english",
+      semantics = list(type = "container"),
+      cues = list(
+        SEG = seg_beaker
+      )
+    )
+
+    speaker <- make_lex_item(
+      id       = "SPEAKER",
+      label    = "speaker",
+      language = "english",
+      semantics = list(type = "device"),
+      cues = list(
+        SEG = seg_speaker
+      )
+    )
+
+    beetle <- make_lex_item(
+      id       = "BEETLE",
+      label    = "beetle",
+      language = "english",
+      semantics = list(type = "animal"),
+      cues = list(
+        SEG = seg_beetle
+      )
+    )
+
+    carriage <- make_lex_item(
+      id       = "CARRIAGE",
+      label    = "carriage",
+      language = "english",
+      semantics = list(type = "object"),
+      cues = list(
+        SEG = seg_carriage
+      )
+    )
+
+    lex <- make_lexicon(
+      items    = list(beaker, speaker, beetle, carriage),
+      language = "english",
+      name     = "english_cohort_seg_only"
+    )
+    return(lex)
+  }
+
+  stop("Unknown version for english: ", version)
+}
+# -----------------------------
+# B2. Mandarin: tone lexicon for 'ma' syllables
+# -----------------------------
+# Version "ma_tones": four MA syllables with different F0 contours.
+#
+# Cues:
+# - F0      : Hz contour over time
+# - NASAL   : degree of nasality (constant here)
+# - VBACK   : vowel backness (constant here)
+#
+# Time steps T = 5 (a short contour)
+
+make_lexicon_mandarin <- function(version = c("default", "ma_tones")) {
+  version <- match.arg(version)
+
+  if (version == "default" || version == "ma_tones") {
+    T <- 5L
+    t <- seq(0, 1, length.out = T)
+
+    # helper: simple stylized F0 contours (in Hz)
+    f0_high   <- rep(220, T)                      # high-level
+    f0_rise   <- seq(180, 230, length.out = T)    # rising
+    f0_dip    <- c(200, 180, 170, 190, 210)       # dipping
+    f0_fall   <- seq(230, 160, length.out = T)    # falling
+
+    nasal <- rep(0.7, T)  # stable [m]
+    vback <- rep(0.8, T)  # back-ish [a]
+
+    ma_high <- make_lex_item(
+      id       = "MA_HIGH",
+      label    = "mā",
+      language = "mandarin",
+      semantics = list(gloss = "mother", tone = "T1"),
+      cues = list(
+        F0    = f0_high,
+        NASAL = nasal,
+        VBACK = vback
+      )
+    )
+
+    ma_rise <- make_lex_item(
+      id       = "MA_RISE",
+      label    = "má",
+      language = "mandarin",
+      semantics = list(gloss = "hemp", tone = "T2"),
+      cues = list(
+        F0    = f0_rise,
+        NASAL = nasal,
+        VBACK = vback
+      )
+    )
+
+    ma_dip <- make_lex_item(
+      id       = "MA_DIP",
+      label    = "mǎ",
+      language = "mandarin",
+      semantics = list(gloss = "horse", tone = "T3"),
+      cues = list(
+        F0    = f0_dip,
+        NASAL = nasal,
+        VBACK = vback
+      )
+    )
+
+    ma_fall <- make_lex_item(
+      id       = "MA_FALL",
+      label    = "mà",
+      language = "mandarin",
+      semantics = list(gloss = "scold", tone = "T4"),
+      cues = list(
+        F0    = f0_fall,
+        NASAL = nasal,
+        VBACK = vback
+      )
+    )
+
+    lex <- make_lexicon(
+      items    = list(ma_high, ma_rise, ma_dip, ma_fall),
+      language = "mandarin",
+      name     = "mandarin_ma_tones"
+    )
+    return(lex)
+  }
+
+  stop("Unknown version for mandarin: ", version)
+}
+
+# -----------------------------
+# B3. Italian: stress lexicon
+# -----------------------------
+# Version "stress_demo": antepenultimate vs penultimate stress
+#
+# Cues:
+# - DUR1, DUR2, DUR3 : relative duration of each syllable (normalized)
+# - F01, F02, F03    : approximate F0 across each syllable
+#
+# Time steps T = 3 (syllable-sized time steps)
+
+# -----------------------------
+# B3. Italian: stress + segment lexicon
+# -----------------------------
+# -----------------------------
+# B3. Italian: stress + segment lexicon
+# -----------------------------
+# Version "stress_demo":
+#
+# Cues:
+# - SEG : segmental identity unfolding over 3 time steps
+#   (Time 1 and 2 identical across all words; time 3 differentiates items)
+#
+# - F0  : prosodic pitch contour (syllable-level)
+# - DUR : prosodic duration pattern (syllable-level)
+#
+# Time steps T = 3
+# -----------------------------
+# B3. Italian: stress + segment lexicon (corrected)
+# -----------------------------
+make_lexicon_italian <- function(version = c("default", "stress_demo")) {
+  version <- match.arg(version)
+
+  if (version == "default" || version == "stress_demo") {
+
+    T <- 3L
+
+    # --------------------------------
+    # Prosodic patterns
+    # --------------------------------
+    dur_ante <- c(1.3, .9, 0.8)   # stress on S1
+    dur_pen  <- c(0.9, 1.4, 0.9)   # stress on S2
+
+    f0_ante <- c(240, 185, 130)
+    f0_pen  <- c(250, 225, 140)
+
+    # --------------------------------
+    # Segment values
+    # --------------------------------
+    # These reflect *syllables*, not phonemes:
+    #   S1 = first syllable
+    #   S2 = second syllable
+    #   S3 = final syllable (the only place pairs differ)
+
+    # Values are arbitrary but capture structure:
+    # Pair 1: càlamo vs calàta share "ca" + "la"
+    # Pair 2: àbaco vs abàte share "a" + "ba"
+
+    SEG_CA  <- 0.80   # first syllable of "càlamo" / "calàta"
+    SEG_LA  <- 0.80   # second syllable of both
+    SEG_MO  <- 0.40
+    SEG_TA  <- 0.70
+
+    SEG_A   <- 0.20   # first syllable of "àbaco" / "abàte"
+    SEG_BA  <- 0.20
+    SEG_CO  <- 0.30
+    SEG_TE  <- 0.80
+
+    make_item <- function(id, label, stress_type, f0, dur, seg) {
+      make_lex_item(
+        id       = id,
+        label    = label,
+        language = "italian",
+        semantics = list(stress = stress_type),
+        cues = list(
+          SEG = seg,
+          F0  = f0,
+          DUR = dur
+        )
+      )
+    }
+
+    # --------------------------------
+    # Build items
+    # --------------------------------
+
+    # Pair 1: càlamo vs calàta
+    calamo <- make_item(
+      id = "CALAMO",
+      label = "càlamo",
+      stress_type = "antepenult",
+      f0  = f0_ante,
+      dur = dur_ante,
+      seg = c(SEG_CA, SEG_LA, SEG_MO)
+    )
+
+    calata <- make_item(
+      id = "CALATA",
+      label = "calàta",
+      stress_type = "penult",
+      f0  = f0_pen,
+      dur = dur_pen,
+      seg = c(SEG_CA, SEG_LA, SEG_TA)
+    )
+
+    # Pair 2: àbaco vs abàte
+    abaco <- make_item(
+      id = "ABACO",
+      label = "àbaco",
+      stress_type = "antepenult",
+      f0  = f0_ante,
+      dur = dur_ante,
+      seg = c(SEG_A, SEG_BA, SEG_CO)
+    )
+
+    abate <- make_item(
+      id = "ABATE",
+      label = "abàte",
+      stress_type = "penult",
+      f0  = f0_pen,
+      dur = dur_pen,
+      seg = c(SEG_A, SEG_BA, SEG_TE)
+    )
+
+    make_lexicon(
+      items = list(calamo, calata, abaco, abate),
+      language = "italian",
+      name = "italian_stress_segment_corrected"
+    )
+  }
+}
+```
+
+
+```{r}
+lex_en <- make_demo_lexicon("english")
+lex_zh <- make_demo_lexicon("mandarin")
+lex_it <- make_demo_lexicon("italian")
+
+lex_en
+lex_zh
+lex_it
+
+lex_en_long <- lexicon_to_long(lex_en)
+
+lex_zh_long <- lexicon_to_long(lex_zh)
+
+lex_it_long <- lexicon_to_long(lex_it)
+```
+
+```{r}
+plot_lexicon_cues <- function(lex_long, title = "Lexicon Cues") {
+  ggplot(lex_long, aes(time, value, color = item_id, group = item_id)) +
+    geom_line(size = 1.2, alpha = 0.9) +
+    geom_point(size = 2) +
+    facet_wrap(~ cue, scales = "free_y") +
+    theme_minimal(base_size = 14) +
+    labs(
+      title = title,
+      x = "Time step",
+      y = "Cue value",
+      color = "Item"
+    ) +
+    theme(
+      plot.title = element_text(size = 16, face = "bold"),
+      strip.text = element_text(size = 12)
+    )
+}
+
+# Plot each language
+plot_lexicon_cues(lex_en_long, title = "English Lexicon: Segmental Cues")
+plot_lexicon_cues(lex_zh_long, title = "Mandarin Lexicon: F0 + Static Cues")
+plot_lexicon_cues(lex_it_long, title = "Italian Lexicon: Stress (DUR + F0)")
+
+```
+```{r}
+
+# ============================
+# Block C: Add token variability
+# ============================
+
+# Given a canonical lexicon, create a new lexicon with multiple
+# noisy tokens per type (e.g., BEAKER_1, BEAKER_2, ...),
+# jittering each cue vector slightly.
+make_noisy_lexicon <- function(lex,
+                               n_tokens = 20,
+                               sd_by_cue = 0.05,
+                               id_suffix = "_t") {
+  stopifnot(inherits(lex, "lexicon"))
+  items <- lex$items
+
+  noisy_items <- list()
+
+  for (item in items) {
+    cue_names <- names(item$cues)
+    T <- lex_item_time_steps(item)
+
+    # build per-cue SD lookup
+    if (length(sd_by_cue) == 1L) {
+      sd_lookup <- setNames(rep(sd_by_cue, length(cue_names)), cue_names)
+    } else {
+      if (is.null(names(sd_by_cue)) || any(names(sd_by_cue) == "")) {
+        stop("If sd_by_cue has length > 1, it must be a named vector by cue.")
+      }
+      sd_lookup <- sd_by_cue
+    }
+
+    for (k in seq_len(n_tokens)) {
+      noisy_cues <- lapply(cue_names, function(cn) {
+        base_vec <- item$cues[[cn]]
+        sd_use   <- sd_lookup[[cn]]
+        if (is.null(sd_use) || is.na(sd_use)) sd_use <- 0
+        base_vec + rnorm(T, mean = 0, sd = sd_use)
+      })
+      names(noisy_cues) <- cue_names
+
+      new_id <- paste0(item$id, id_suffix, k)
+      noisy_items[[new_id]] <- make_lex_item(
+        id       = new_id,
+        label    = item$label,      # keep word label the same
+        language = item$language,
+        semantics = item$semantics,
+        cues      = noisy_cues
+      )
+    }
+  }
+
+  make_lexicon(
+    items    = noisy_items,
+    language = lex$language,
+    name     = paste0(lex$name, "_noisy")
+  )
+}
+```
+
+```{r}
+
+# Canonical (type-level) lexicons
+lex_en <- make_demo_lexicon("english")
+lex_zh <- make_demo_lexicon("mandarin")
+lex_it <- make_demo_lexicon("italian")
+
+# Noisy token lexicons (these are what you'll use in the model later)
+lex_en_noisy <- make_noisy_lexicon(
+  lex_en,
+  n_tokens = 20,
+  sd_by_cue = c(SEG = 0.05)
+)
+
+lex_zh_noisy <- make_noisy_lexicon(
+  lex_zh,
+  n_tokens = 20,
+  sd_by_cue = c(
+    F0    = 5,     # Hz jitter
+    NASAL = 0.05,
+    VBACK = 0.05
+  )
+)
+
+lex_it_noisy <- make_noisy_lexicon(
+  lex_it,
+  n_tokens = 20,
+  sd_by_cue = c(
+    SEG = 0.05,
+    F0  = 5,
+    DUR = 0.05
+  )
+)
+
+# Long format for plotting
+lex_en_noisy_long <- lexicon_to_long(lex_en_noisy)
+lex_zh_noisy_long <- lexicon_to_long(lex_zh_noisy)
+lex_it_noisy_long <- lexicon_to_long(lex_it_noisy)
+
+```
+
+```{r}
+plot_lexicon_cues_tokens <- function(lex_long, title = "Lexicon Tokens") {
+  ggplot(
+    lex_long,
+    aes(x = time, y = value,
+        group = item_id,
+        color = label)
+  ) +
+    geom_line(linewidth = 0.4, alpha = 0.5) +
+    facet_wrap(~ cue, scales = "free_y") +
+    theme_minimal(base_size = 14) +
+    labs(
+      title = title,
+      x = "Time step",
+      y = "Cue value",
+      color = "Word"
+    ) +
+    theme(
+      plot.title = element_text(size = 16, face = "bold"),
+      strip.text = element_text(size = 12)
+    )+
+    scale_color_manual(values = c(
+      "#D7261E",  # red
+      "#0A9100",  # green
+      "#FF8C00",  # orange
+      "#1A4FFF"   # blue
+    ))+ 
+    theme(legend.position = "bottom")
+}
+
+# Plot noisy token lexicons
+plot_lexicon_cues_tokens(lex_en_noisy_long,
+                         title = "English Lexicon (Tokens): SEG")
+unique(lex_zh_noisy_long$label)
+plot_lexicon_cues_tokens(lex_zh_noisy_long,
+                         title = "Mandarin Lexicon (Tokens): F0 + Static Cues")
+
+plot_lexicon_cues_tokens(lex_it_noisy_long,
+                         title = "Italian Lexicon (Tokens): SEG + F0 + DUR")
+```
+
+```{r}
+#mandarin visual update---
+tone_colors <- c(
+  "mā" = "#FF8C00",   # T1 - orange
+  "má" = "#1A4FFF",   # T2 - blue
+  "mǎ" = "#D7261E",   # T3 - red
+  "mà" = "#0A9100"    # T4 - blue
+)
+
+
+plot_lexicon_cues_tokens2 <- function(lex_long, title = "Lexicon Tokens") {
+
+  ggplot(
+    lex_long,
+    aes(x = time, y = value,
+        group = item_id,
+        color = label)
+  ) +
+    geom_line(linewidth = 0.4, alpha = 0.5) +
+    facet_wrap(~ cue, scales = "free_y") +
+    theme_minimal(base_size = 14) +
+    labs(
+      title = title,
+      x = "Time step",
+      y = "Cue value",
+      color = "Word"
+    ) +
+    theme(
+      plot.title = element_text(size = 16, face = "bold"),
+      strip.text = element_text(size = 12)
+    ) +
+    scale_color_manual(values = tone_colors) +
+    theme(legend.position = "bottom")
+}
+
+plot_lexicon_cues_tokens2(lex_zh_noisy_long,
+                         title = "Mandarin Lexicon (Tokens): F0 + Static Cues")
+
+
+```
+
+
+
+```{r}
+
+# =====================================
+# Block C: Listener profiles (CLEAN + FINAL)
+# =====================================
+
+# Default label-map: each lexical item is its own category
+default_label_map <- function(ids) {
+  ids <- as.character(ids)
+  stats::setNames(ids, ids)
+}
+
+# Core listener constructor
+make_listener <- function(profile_name,
+                          attention,
+                          language          = NA_character_,
+                          category_sd_scale = 1.0,
+                          internal_noise_sd = 0.0,
+                          label_map         = default_label_map) {
+
+  # Check attention is a valid named numeric vector
+  if (!is.numeric(attention) ||
+      is.null(names(attention)) ||
+      any(names(attention) == "")) {
+    stop("`attention` must be a named numeric vector, e.g. c(SEG = 1, F0 = 0.5).")
+  }
+
+  out <- list(
+    profile_name      = profile_name,
+    language          = language,
+    attention         = attention,
+    category_sd_scale = category_sd_scale,
+    internal_noise_sd = internal_noise_sd,
+    label_map         = label_map
+  )
+
+  class(out) <- c("listener", class(out))
+  out
+}
+
+# Pretty printer
+print.listener <- function(x, ...) {
+  cat("<listener>\n")
+  cat("  profile_name     :", x$profile_name, "\n")
+  cat("  language         :", if (is.na(x$language)) "unspecified" else x$language, "\n")
+  cat("  attention (cues) :\n")
+
+  if (length(x$attention) == 0L) {
+    cat("    (none)\n")
+  } else {
+    for (nm in names(x$attention)) {
+      cat(sprintf("    %-6s = %0.3f\n", nm, x$attention[[nm]]))
+    }
+  }
+
+  cat("  category_sd_scale:", x$category_sd_scale, "\n")
+  cat("  internal_noise_sd :", x$internal_noise_sd, "\n")
+  cat("  label_map         : function(ids) -> categories\n")
+  invisible(x)
+}
+
+```
+
+
+```{r}
+listener_en_seg <- make_listener(
+  profile_name = "L1_english_SEG",
+  language     = "english",
+  attention    = c(SEG = 1.0),
+  category_sd_scale = 1.0,
+  internal_noise_sd = 0.05
+)
+
+# High pitch weighting (native-like)
+listener_zh_highF0 <- make_listener(
+  profile_name = "L1_mandarin_highF0",
+  language     = "mandarin",
+  attention    = c(F0 = 1.0, NASAL = 0.3, VBACK = 0.3),
+  category_sd_scale = 1.0,
+  internal_noise_sd = 0.05
+)
+
+# Low pitch weighting (L2-like)
+listener_zh_lowF0 <- make_listener(
+  profile_name = "L2_mandarin_lowF0",
+  language     = "mandarin",
+  attention    = c(F0 = 0.3, NASAL = 0.5, VBACK = 0.5),
+  category_sd_scale = 1.3,
+  internal_noise_sd = 0.10
+)
+
+listener_it_dur_high <- make_listener(
+  profile_name = "L1_italian_seg_dom",
+  language     = "italian",
+  attention    = c(
+    SEG = 10.0,   # segments carry *a lot* of weight
+    DUR = 0.3,   # stress is softer
+    F0  = 0.0002    # pitch weakest
+  ),
+  category_sd_scale = 1.0,
+  internal_noise_sd = 0.05
+)
+
+# L2-like weaker duration sensitivity
+listener_it_dur_low <- make_listener(
+  profile_name = "L2_italian_duration_low",
+  language     = "italian",
+  attention    = c(SEG = 0.8, F0 = 0.2, DUR = 0.1),
+  category_sd_scale = 1.3,
+  internal_noise_sd = 0.10
+)
+
+
+```
+
+
+```{r}
+# ============================
+# Block D: Cue & category utilities
+# ============================
+
+# D1. Extract cue matrix at a single time step
+# -------------------------------------------
+# Returns a numeric matrix [n_items x n_cues]
+#  - rows  = item IDs
+#  - cols  = cue names (e.g., "SEG", "F0", "DUR")
+get_cue_matrix_at_time <- function(lex, t) {
+  stopifnot(inherits(lex, "lexicon"))
+
+  T <- lexicon_time_steps(lex)
+  if (T == 0L) {
+    stop("Lexicon has no cues (T = 0).")
+  }
+  if (t < 1L || t > T) {
+    stop("Requested time t = ", t, " is outside 1..", T)
+  }
+
+  item_ids  <- names(lex$items)
+  # assume all items share the same cue set
+  cue_names <- names(lex$items[[1]]$cues)
+
+  mat <- matrix(
+    NA_real_,
+    nrow = length(item_ids),
+    ncol = length(cue_names),
+    dimnames = list(item_ids, cue_names)
+  )
+
+  for (i in seq_along(item_ids)) {
+    it <- lex$items[[i]]
+    for (cn in cue_names) {
+      mat[i, cn] <- it$cues[[cn]][t]
+    }
+  }
+
+  mat
+}
+
+# (Optional) helper if you ever want all cue names
+get_lexicon_cue_names <- function(lex) {
+  stopifnot(inherits(lex, "lexicon"))
+  if (length(lex$items) == 0L) return(character(0))
+  names(lex$items[[1]]$cues)
+}
+
+# D2. Build cue-wise category SDs from the lexicon
+# -----------------------------------------------
+# We compute SD for each cue across *all items and time steps*.
+# If SD is 0 or NA (no variation), we fall back to a small constant.
+make_cue_sd_from_lexicon <- function(lex, min_sd = 0.05) {
+  stopifnot(inherits(lex, "lexicon"))
+
+  df <- lexicon_to_long(lex)
+  if (nrow(df) == 0L) {
+    stop("Lexicon has no cue values; cannot estimate cue SDs.")
+  }
+
+  # SD per cue across all items and time steps
+  sds <- tapply(df$value, df$cue, stats::sd, na.rm = TRUE)
+
+  # Replace NA or zero with a small floor
+  sds[is.na(sds) | sds == 0] <- min_sd
+
+  # Ensure it's a named numeric vector
+  sds <- as.numeric(sds)
+  names(sds) <- names(tapply(df$value, df$cue, sum))
+
+  sds
+}
+
+# D3. Simple priors over lexical items
+# ------------------------------------
+
+# Uniform prior over all lexical items in a lexicon
+make_uniform_prior <- function(lex) {
+  stopifnot(inherits(lex, "lexicon"))
+  ids <- names(lex$items)
+  if (length(ids) == 0L) stop("Lexicon has no items.")
+
+  p <- rep(1 / length(ids), length(ids))
+  stats::setNames(p, ids)
+}
+
+# (Optional) prior biased to a subset of items, but normalized
+# weights is a *named* numeric vector keyed by item_id,
+# everything else gets weight = 1 before renormalization.
+make_weighted_prior <- function(lex, weights = numeric(0)) {
+  stopifnot(inherits(lex, "lexicon"))
+  ids <- names(lex$items)
+  base <- rep(1, length(ids))
+  names(base) <- ids
+
+  if (length(weights) > 0L) {
+    # only apply weights to matching IDs
+    match_ids <- intersect(names(weights), ids)
+    base[match_ids] <- base[match_ids] * weights[match_ids]
+  }
+
+  base <- base / sum(base)
+  base
+}
+
+
+```
+
+```{r}
+# =====================================
+# Block E: Incremental recognition engine
+# =====================================
+
+# Softmax in log-space (for numerical stability)
+softmax_log <- function(log_x) {
+  m     <- max(log_x)
+  exp_x <- exp(log_x - m)
+  exp_x / sum(exp_x)
+}
+
+# Compute incremental log-likelihood for all items at a single time step
+# given a stimulus item, a listener, and a lexicon.
+compute_token_loglik_time <- function(lex,
+                                      listener,
+                                      stim_id,
+                                      t,
+                                      base_sd = 1.0) {
+  stopifnot(inherits(lex, "lexicon"))
+
+  ids <- names(lex$items)
+
+  # Which cues are actually used? Intersection of lexicon cues and listener attention
+  first_item <- lex$items[[1]]
+  cue_names  <- intersect(names(listener$attention), names(first_item$cues))
+
+  if (length(cue_names) == 0L) {
+    stop("No overlapping cues between lexicon and listener attention.")
+  }
+
+  stim <- lex$items[[stim_id]]
+  if (is.null(stim)) {
+    stop("stim_id not found in lexicon: ", stim_id)
+  }
+
+  Tlex <- lexicon_time_steps(lex)
+  if (Tlex <= 0L) {
+    stop("Lexicon has no cues (T = 0).")
+  }
+  if (t < 1L || t > Tlex) {
+    stop("Requested time t must be between 1 and ", Tlex, ".")
+  }
+
+  # Effective noise: base_sd scaled by listener's category_sd_scale
+  sd_eff <- base_sd * listener$category_sd_scale
+
+  out <- numeric(length(ids))
+  names(out) <- ids
+
+  for (i in seq_along(ids)) {
+    word_id <- ids[[i]]
+    word    <- lex$items[[word_id]]
+
+    acc_loglik <- 0
+
+    for (cue in cue_names) {
+      att <- listener$attention[[cue]]
+      if (is.na(att) || att <= 0) next
+
+      x  <- stim$cues[[cue]][t]   # "observed" value at time t
+      mu <- word$cues[[cue]][t]   # lexical expectation for this word
+
+      # Attention as a weight on the cue's log-likelihood
+      acc_loglik <- acc_loglik + att * dnorm(x, mean = mu, sd = sd_eff, log = TRUE)
+    }
+
+    out[[i]] <- acc_loglik
+  }
+
+  out
+}
+
+# Main engine: incremental posterior over words for a given stimulus
+#
+# - lex        : lexicon object
+# - listener   : listener object (attention, sd scale, label_map)
+# - stim_id    : which lexicon item is presented as the "true" stimulus
+# - base_sd    : base perceptual noise before scaling by category_sd_scale
+# - stickiness : 0 = pure Bayesian update each slice;
+#                >0 blends current posterior with previous time step
+# - prior      : optional word prior (named vector). If NULL, uniform.
+#
+# Returns: tibble(time, item_id, category, post)
+predict_incremental_posteriors <- function(lex,
+                                           listener,
+                                           stim_id,
+                                           base_sd    = 1.0,
+                                           stickiness = 0.3,
+                                           prior      = NULL) {
+  stopifnot(inherits(lex, "lexicon"))
+
+  ids     <- names(lex$items)
+  n_items <- length(ids)
+  Tlex    <- lexicon_time_steps(lex)
+
+  if (Tlex <= 0L) {
+    stop("Lexicon must have cues (T > 0) for incremental recognition.")
+  }
+
+  # Prior over items
+  if (is.null(prior)) {
+    prior <- rep(1 / n_items, n_items)
+    names(prior) <- ids
+  } else {
+    if (length(prior) != n_items) {
+      stop("`prior` must have length equal to number of items in the lexicon.")
+    }
+    if (is.null(names(prior))) {
+      names(prior) <- ids
+    }
+    prior <- prior / sum(prior)
+  }
+  log_prior <- log(prior)
+
+  # Category labels via listener's label_map
+  cat_map <- listener$label_map(ids)
+  if (is.null(names(cat_map))) {
+    # assume the returned vector is already aligned to ids
+    names(cat_map) <- ids
+  }
+
+  # Storage
+  post_list  <- vector("list", Tlex)
+  prev_post  <- NULL
+  cum_loglik <- rep(0, n_items)
+  names(cum_loglik) <- ids
+
+  for (t in seq_len(Tlex)) {
+    # Incremental evidence at this time slice
+    loglik_t <- compute_token_loglik_time(
+      lex      = lex,
+      listener = listener,
+      stim_id  = stim_id,
+      t        = t,
+      base_sd  = base_sd
+    )
+
+    # Cumulative log-likelihood (Bayesian accumulation)
+    cum_loglik <- cum_loglik + loglik_t
+    log_post   <- log_prior + cum_loglik
+
+    # Convert to posterior over items (normalized, sums to 1)
+    post_raw <- softmax_log(log_post)
+
+    # Optional "stickiness" across time (jTRACE-style smoothing)
+    if (!is.null(prev_post) && stickiness > 0) {
+      post_t <- stickiness * prev_post + (1 - stickiness) * post_raw
+      post_t <- post_t / sum(post_t)  # renormalize just in case
+    } else {
+      post_t <- post_raw
+    }
+
+    prev_post <- post_t
+
+    # Store as tidy tibble
+    post_list[[t]] <- tibble::tibble(
+      time     = t,
+      item_id  = ids,
+      category = cat_map[ids],
+      post     = as.numeric(post_t[ids])
+    )
+  }
+
+  dplyr::bind_rows(post_list)
+}
+```
+
+```{r}
+# =====================================
+# Block E2: Token prep + single-trial glue
+# =====================================
+
+# For now, a "token" is just a reference to a lexical item.
+# (If you want extra trial noise later, we can add it here.)
+prepare_token <- function(lex, item_id, listener) {
+  stopifnot(inherits(lex, "lexicon"))
+
+  if (!(item_id %in% names(lex$items))) {
+    stop("item_id not found in lexicon: ", item_id)
+  }
+
+  item <- lex$items[[item_id]]
+
+  list(
+    true_id    = item$id,
+    true_label = item$label
+  )
+}
+
+# Wrapper: run the incremental engine once for a single token
+incremental_recognize_single <- function(token,
+                                         lex,
+                                         listener,
+                                         tau = 0.3,               # stickiness
+                                         return_trajectory = TRUE) {
+
+  # Use listener's internal noise if > 0, else fall back to 1.0
+  base_sd <- listener$internal_noise_sd
+  if (is.null(base_sd) || base_sd <= 0) base_sd <- 1.0
+
+  post_df <- predict_incremental_posteriors(
+    lex        = lex,
+    listener   = listener,
+    stim_id    = token$true_id,
+    base_sd    = base_sd,
+    stickiness = tau,
+    prior      = NULL
+  )
+
+  # Standardize to 'post' column for downstream code
+  out <- dplyr::rename(post_df, post = posterior)
+
+  if (!return_trajectory) {
+    out <- dplyr::filter(out, time == max(time))
+  }
+
+  out
+}
+```
+
+
+
+```{r}
+# ===============================
+# Block F: Running the model
+# ===============================
+
+# F1. Helper: repeatedly recognize noisy tokens of a given target
+run_repeated_recognition <- function(lex,
+                                     listener,
+                                     target_id,
+                                     n_reps         = 200,
+                                     tau            = 1,
+                                     listener_label = NULL) {
+  if (is.null(listener_label)) {
+    listener_label <- listener$profile_name %||% "listener"
+  }
+
+  reps <- seq_len(n_reps)
+
+  purrr::map_dfr(
+    reps,
+    function(r) {
+      tok <- prepare_token(
+        lex      = lex,
+        item_id  = target_id,
+        listener = listener
+      )
+
+      traj <- incremental_recognize_single(
+        token            = tok,
+        lex              = lex,
+        listener         = listener,
+        tau              = tau,
+        return_trajectory = TRUE
+      )
+
+      # standardize posterior column name if needed
+      if (!"post" %in% names(traj) && "posterior" %in% names(traj)) {
+        traj$post <- traj$posterior
+      }
+
+      traj$rep       <- r
+      traj$listener  <- listener_label
+      traj$true_id   <- tok$true_id
+      traj$true_label <- tok$true_label
+      traj
+    }
+  )
+}
+
+# F2. Summarize trajectories over repetitions
+summarise_trajectory <- function(df) {
+  df %>%
+    group_by(listener, time, item_id) %>%
+    summarise(
+      mean_post = mean(post, na.rm = TRUE),
+      low       = quantile(post, 0.10, na.rm = TRUE),
+      high      = quantile(post, 0.90, na.rm = TRUE),
+      .groups   = "drop"
+    )
+}
+
+# F3. Generic plotting function for timecourses
+plot_timecourse_2 <- function(df_summary,
+                            title = "Incremental recognition timecourse") {
+  ggplot(df_summary,
+         aes(time, mean_post,
+             color = item_id,
+             group = item_id)) +
+    geom_ribbon(aes(ymin = low, ymax = high, fill = item_id),
+                alpha = 0.15,
+                colour = NA,
+                show.legend = FALSE) +
+    geom_line(size = 1) +
+    geom_point(size = 1.8) +
+    facet_wrap(~ listener) +
+    scale_y_continuous(limits = c(0, 1)) +
+    labs(
+      title = title,
+      x     = "Time step",
+      y     = "Posterior P(word | cues)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(face = "bold")
+    )
+}
+
+# F3. Generic plotting function for timecourses
+plot_timecourse <- function(df_summary,
+                            title = "Incremental recognition timecourse") {
+  ggplot(df_summary,
+         aes(time, mean_post,
+             color = item_id,
+             group = item_id)) +
+    geom_ribbon(aes(ymin = low, ymax = high, fill = item_id),
+                alpha = 0.15,
+                colour = NA,
+                show.legend = FALSE) +
+    geom_line(size = 1) +
+    geom_point(size = 1.8) +
+    facet_wrap(~ listener) +
+    scale_y_continuous(limits = c(0, 1)) +
+    labs(
+      title = title,
+      x     = "Time step",
+      y     = "Posterior P(word | cues)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(face = "bold")
+    )
+}
+
+```
+
+```{r}
+# Lexicon + listeners (already defined above)
+lex_en <- make_demo_lexicon("english")
+
+sim1 <- predict_incremental_posteriors(
+  lex        = lex_en,
+  listener   = listener_en_seg,
+  stim_id    = "BEAKER",
+  base_sd    = 0.3,
+  stickiness = 0.3
+)
+
+# ---------------------------
+# ADD TIME ZERO (uniform prior)
+# ---------------------------
+n_items <- length(unique(sim1$item_id))
+
+time0 <- tibble::tibble(
+  time     = 0,
+  item_id  = unique(sim1$item_id),
+  mean_post = rep(1 / n_items, n_items),
+  low       = rep(1 / n_items, n_items),
+  high      = rep(1 / n_items, n_items),
+  listener  = "L1 English (SEG)"
+)
+
+# --- summarise for plotting ---
+sim1_sum <- sim1 %>% 
+  dplyr::group_by(time, item_id) %>% 
+  dplyr::summarise(
+    mean_post = mean(post),
+    low       = quantile(post, 0.025, na.rm = TRUE),
+    high      = quantile(post, 0.975, na.rm = TRUE),
+    .groups   = "drop"
+  ) %>%
+  dplyr::mutate(listener = "L1 English (SEG)")
+
+# prepend time=0
+sim1_sum <- dplyr::bind_rows(time0, sim1_sum) %>% 
+  dplyr::arrange(time)
+
+# Plot
+plot_timecourse(
+  sim1_sum,
+  title = "Simulation 1 – English cohort competition"
+)
+```
+
+
+```{r}
+
+# =========================
+# Simulation 2: Mandarin
+# =========================
+
+lex_zh <- make_demo_lexicon("mandarin")
+
+# raw incremental posteriors
+sim2 <- predict_incremental_posteriors(
+  lex        = lex_zh,
+  listener   = listener_zh_highF0,   # L1-ish strong pitch listener
+  stim_id    = "MA_RISE",           # or MA_HIGH / MA_DIP / MA_FALL
+  base_sd    = 30,
+  stickiness = 0.8
+)
+
+# sanity check: should sum to 1 per time step
+sim2 %>% 
+  dplyr::group_by(time) %>% 
+  dplyr::summarise(sum_post = sum(post), .groups = "drop")
+
+# --- summarise for plotting ---
+sim2_sum <- sim2 %>% 
+  dplyr::group_by(time, item_id) %>% 
+  dplyr::summarise(
+    mean_post = mean(post),
+    low       = stats::quantile(post, 0.025, na.rm = TRUE),
+    high      = stats::quantile(post, 0.975, na.rm = TRUE),
+    .groups   = "drop"
+  ) %>%
+  dplyr::mutate(listener = "L1 Mandarin (high F0)")
+
+# ---------------------------
+# ADD TIME ZERO (uniform prior)
+# ---------------------------
+n_items_zh <- length(unique(sim2_sum$item_id))
+
+time0_zh <- tibble::tibble(
+  time      = 0,
+  item_id   = unique(sim2_sum$item_id),
+  mean_post = rep(1 / n_items_zh, n_items_zh),
+  low       = rep(1 / n_items_zh, n_items_zh),
+  high      = rep(1 / n_items_zh, n_items_zh),
+  listener  = "L1 Mandarin (high F0)"
+)
+
+sim2_sum <- dplyr::bind_rows(time0_zh, sim2_sum) %>% 
+  dplyr::arrange(time)
+
+plot_timecourse(
+  sim2_sum,
+  title = "Simulation 2 – Mandarin tone competition"
+)
+```
+
+```{r}
+# =========================
+# Simulation 2: Mandarin (all tones as targets)
+# =========================
+
+lex_zh <- make_demo_lexicon("mandarin")
+
+targets_zh <- c("MA_HIGH", "MA_RISE", "MA_DIP", "MA_FALL")
+
+# run the model for each target tone and stack
+sim2_all <- purrr::map_dfr(
+  targets_zh,
+  function(tid) {
+    pred <- predict_incremental_posteriors(
+      lex        = lex_zh,
+      listener   = listener_zh_highF0,  # L1-ish strong pitch listener
+      stim_id    = tid,
+      base_sd    = 30,                  # your current setting
+      stickiness = 0.8
+    )
+
+    # add target metadata
+    tibble::as_tibble(pred) %>%
+      dplyr::mutate(
+        listener     = "L1 Mandarin (high F0)",
+        target_id    = tid,
+        target_label = lex_zh$items[[tid]]$label
+      )
+  }
+)
+
+# sanity check: sum to 1 for each time * target
+sim2_all %>% 
+  dplyr::group_by(target_label, time) %>% 
+  dplyr::summarise(sum_post = sum(post), .groups = "drop")
+
+
+# summarise for plotting
+sim2_sum <- sim2_all %>%
+  dplyr::group_by(listener, target_label, time, item_id) %>%
+  dplyr::summarise(
+    mean_post = mean(post, na.rm = TRUE),
+    low       = stats::quantile(post, 0.025, na.rm = TRUE),
+    high      = stats::quantile(post, 0.975, na.rm = TRUE),
+    .groups   = "drop"
+  )
+
+# add time 0 (uniform over items) *for each target*
+n_items_zh <- length(unique(sim2_sum$item_id))
+
+time0_zh <- expand.grid(
+  time         = 0,
+  item_id      = unique(sim2_sum$item_id),
+  target_label = unique(sim2_sum$target_label),
+  stringsAsFactors = FALSE
+) %>%
+  dplyr::mutate(
+    mean_post = 1 / n_items_zh,
+    low       = 1 / n_items_zh,
+    high      = 1 / n_items_zh,
+    listener  = "L1 Mandarin (high F0)"
+  )
+
+sim2_sum <- dplyr::bind_rows(time0_zh, sim2_sum) %>%
+  dplyr::arrange(target_label, time)
+
+
+plot_timecourse_by_target <- function(df_summary,
+                                      title = "Incremental recognition – Mandarin tones") {
+  ggplot(df_summary,
+         aes(time, mean_post,
+             color = item_id,
+             group = item_id)) +
+    geom_ribbon(aes(ymin = low, ymax = high, fill = item_id),
+                alpha = 0.15,
+                colour = NA,
+                show.legend = FALSE) +
+    geom_line(size = 1) +
+    geom_point(size = 1.8) +
+    facet_wrap(~ target_label) +
+    scale_y_continuous(limits = c(0, 1)) +
+    labs(
+      title = title,
+      x     = "Time step",
+      y     = "Posterior P(word | cues)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(face = "bold")
+    )
+}
+
+# draw it
+plot_timecourse_by_target(
+  sim2_sum,
+  title = "Simulation 2 – Mandarin tone competition (all targets)"
+)
+
+```
+
+
+```{r}
+# =========================
+# Simulation 3: Italian
+# =========================
+
+lex_it <- make_demo_lexicon("italian")
+
+sim3 <- predict_incremental_posteriors(
+  lex        = lex_it,
+  listener   = listener_it_dur_high,  # now segment-priority
+  stim_id    = "CALAMO",              # target càlamo
+  base_sd    = .4,
+  stickiness = 0.2
+)
+
+# sanity check
+sim3 %>% 
+  dplyr::group_by(time) %>% 
+  dplyr::summarise(sum_post = sum(post), .groups = "drop")
+
+# summarise for plotting
+sim3_sum <- sim3 %>% 
+  dplyr::group_by(time, item_id) %>% 
+  dplyr::summarise(
+    mean_post = mean(post),
+    low       = quantile(post, 0.025, na.rm = TRUE),
+    high      = quantile(post, 0.975, na.rm = TRUE),
+    .groups   = "drop"
+  ) %>%
+  dplyr::mutate(listener = "L1 Italian (segments > stress)")
+
+# time 0
+n_items_it <- length(unique(sim3_sum$item_id))
+
+time0_it <- tibble::tibble(
+  time      = 0,
+  item_id   = unique(sim3_sum$item_id),
+  mean_post = rep(1 / n_items_it, n_items_it),
+  low       = rep(1 / n_items_it, n_items_it),
+  high      = rep(1 / n_items_it, n_items_it),
+  listener  = "L1 Italian (segments > stress)"
+)
+
+sim3_sum <- dplyr::bind_rows(time0_it, sim3_sum) %>% 
+  dplyr::arrange(time)
+
+plot_timecourse(
+  sim3_sum,
+  title = "Simulation 3 – Italian stress + segment competition"
+)
+```
+
+
+```{r}
+# ---- Noisy version of token log-likelihood (per time step) ----
+compute_token_loglik_time_noisy <- function(lex,
+                                            listener,
+                                            stim_id,
+                                            t,
+                                            base_sd    = 1.0,
+                                            obs_noise_sd = NULL) {
+  stopifnot(inherits(lex, "lexicon"))
+
+  ids <- names(lex$items)
+
+  # Which cues are actually used? Intersection of lexicon cues and listener attention
+  first_item <- lex$items[[1]]
+  cue_names  <- intersect(names(listener$attention), names(first_item$cues))
+
+  if (length(cue_names) == 0L) {
+    stop("No overlapping cues between lexicon and listener attention.")
+  }
+
+  stim <- lex$items[[stim_id]]
+  if (is.null(stim)) {
+    stop("stim_id not found in lexicon: ", stim_id)
+  }
+
+  Tlex <- lexicon_time_steps(lex)
+  if (Tlex <= 0L) {
+    stop("Lexicon has no cues (T = 0).")
+  }
+  if (t < 1L || t > Tlex) {
+    stop("Requested time t must be between 1 and ", Tlex, ".")
+  }
+
+  # Effective category noise (same as before)
+  sd_eff <- base_sd * listener$category_sd_scale
+
+  # Observation noise for this token
+  if (is.null(obs_noise_sd)) {
+    # fall back to listener's internal_noise_sd; if that's 0, it's deterministic
+    obs_noise_sd <- listener$internal_noise_sd %||% 0
+  }
+
+  out <- numeric(length(ids))
+  names(out) <- ids
+
+  for (i in seq_along(ids)) {
+    word_id <- ids[[i]]
+    word    <- lex$items[[word_id]]
+
+    acc_loglik <- 0
+
+    for (cue in cue_names) {
+      att <- listener$attention[[cue]]
+      if (is.na(att) || att <= 0) next
+
+      mean_x <- stim$cues[[cue]][t]
+
+      # ---- NEW: noisy token observation ----
+      if (obs_noise_sd > 0) {
+        x <- rnorm(1, mean = mean_x, sd = obs_noise_sd)
+      } else {
+        x <- mean_x
+      }
+
+      mu <- word$cues[[cue]][t]   # lexical expectation for this word
+
+      acc_loglik <- acc_loglik + att * dnorm(x, mean = mu, sd = sd_eff, log = TRUE)
+    }
+
+    out[[i]] <- acc_loglik
+  }
+
+  out
+}
+
+# ---- Noisy incremental posterior for one token ----
+predict_incremental_posteriors_noisy <- function(lex,
+                                                 listener,
+                                                 stim_id,
+                                                 base_sd     = 1.0,
+                                                 stickiness  = 0.3,
+                                                 prior       = NULL,
+                                                 obs_noise_sd = NULL) {
+  stopifnot(inherits(lex, "lexicon"))
+
+  ids     <- names(lex$items)
+  n_items <- length(ids)
+  Tlex    <- lexicon_time_steps(lex)
+
+  if (Tlex <= 0L) {
+    stop("Lexicon must have cues (T > 0) for incremental recognition.")
+  }
+
+  # Prior over items
+  if (is.null(prior)) {
+    prior <- rep(1 / n_items, n_items)
+    names(prior) <- ids
+  } else {
+    if (length(prior) != n_items) {
+      stop("`prior` must have length equal to number of items in the lexicon.")
+    }
+    if (is.null(names(prior))) {
+      names(prior) <- ids
+    }
+    prior <- prior / sum(prior)
+  }
+  log_prior <- log(prior)
+
+  # Category labels via listener's label_map
+  cat_map <- listener$label_map(ids)
+  if (is.null(names(cat_map))) {
+    names(cat_map) <- ids
+  }
+
+  post_list   <- vector("list", Tlex)
+  prev_post   <- NULL
+  cum_loglik  <- rep(0, n_items)
+  names(cum_loglik) <- ids
+
+  for (t in seq_len(Tlex)) {
+    # NEW: noisy evidence
+    loglik_t <- compute_token_loglik_time_noisy(
+      lex          = lex,
+      listener     = listener,
+      stim_id      = stim_id,
+      t            = t,
+      base_sd      = base_sd,
+      obs_noise_sd = obs_noise_sd
+    )
+
+    cum_loglik <- cum_loglik + loglik_t
+    log_post   <- log_prior + cum_loglik
+
+    post_raw <- softmax_log(log_post)
+
+    if (!is.null(prev_post) && stickiness > 0) {
+      post_t <- stickiness * prev_post + (1 - stickiness) * post_raw
+      post_t <- post_t / sum(post_t)
+    } else {
+      post_t <- post_raw
+    }
+
+    prev_post <- post_t
+
+    post_list[[t]] <- tibble::tibble(
+      time     = t,
+      item_id  = ids,
+      category = cat_map[ids],
+      post     = as.numeric(post_t[ids])
+    )
+  }
+
+  dplyr::bind_rows(post_list)
+}
+```
+
+```{r}
+# Run many noisy tokens of the same target, for one listener
+run_noisy_reps <- function(lex,
+                           listener,
+                           stim_id,
+                           n_reps        = 50,
+                           base_sd       = 1.0,
+                           stickiness    = 0.3,
+                           obs_noise_sd  = NULL,
+                           listener_label = NULL) {
+  if (is.null(listener_label)) {
+    listener_label <- listener$profile_name %||% "listener"
+  }
+
+  purrr::map_dfr(seq_len(n_reps), function(r) {
+    traj <- predict_incremental_posteriors_noisy(
+      lex         = lex,
+      listener    = listener,
+      stim_id     = stim_id,
+      base_sd     = base_sd,
+      stickiness  = stickiness,
+      obs_noise_sd = obs_noise_sd
+    )
+
+    traj$rep       <- r
+    traj$listener  <- listener_label
+    traj$true_id   <- stim_id
+    traj
+  })
+}
+```
+
+```{r}
+# ----------------------------------------
+# Plot timecourse with individual rep lines
+# ----------------------------------------
+ plot_timecourse_with_reps <- function(df_reps,
+                                      df_summary,
+                                      title = "Incremental recognition (with variability)") {
+
+  ggplot() +
+    # thin lines for each repetition
+    geom_line(
+      data = df_reps,
+      aes(x = time, y = post, group = interaction(rep, item_id), color = item_id),
+      alpha = 0.2, size = 0.4, show.legend = FALSE
+    ) +
+    # main mean trajectory + points
+    geom_line(
+      data = df_summary,
+      aes(x = time, y = mean_post, color = item_id, group = item_id),
+      size = 1
+    ) +
+    geom_point(
+      data = df_summary,
+      aes(x = time, y = mean_post, color = item_id),
+      size = 1.8
+    ) +
+    facet_wrap(~ listener) +
+    scale_y_continuous(limits = c(0, 1)) +
+    labs(
+      title = title,
+      x     = "Time step",
+      y     = "Posterior P(word | cues)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(face = "bold")
+    ) +
+    scale_color_manual(values = c(
+      "#D7261E",  # red
+      "#0A9100",  # green
+      "#FF8C00",  # orange
+      "#1A4FFF"   # blue
+    ))+ 
+     theme(legend.position = "bottom")
+}
+```
+
+
+```{r}
+## ---------- English with token variability ----------
+lex_en <- make_demo_lexicon("english")
+
+set.seed(123)
+
+sim1_reps <- run_noisy_reps(
+  lex            = lex_en,
+  listener       = listener_en_seg,
+  stim_id        = "BEAKER",
+  n_reps         = 50,
+  base_sd        = 0.2,
+  stickiness     = 0.3,
+  obs_noise_sd   = 0.1,
+  listener_label = "L1 English (SEG)"
+)
+
+# ---------------------------
+# ADD TIME 0 TO THE REPS (thin lines)
+# ---------------------------
+n_items_en <- length(unique(sim1_reps$item_id))
+n_reps_en  <- length(unique(sim1_reps$rep))
+prior_en   <- 1 / n_items_en
+
+time0_en_reps <- expand.grid(
+  rep     = seq_len(n_reps_en),
+  item_id = unique(sim1_reps$item_id),
+  time    = 0,
+  stringsAsFactors = FALSE
+) %>%
+  dplyr::mutate(
+    post     = prior_en,                 # uniform prior
+    listener = "L1 English (SEG)",       # same as listener_label above
+    true_id  = "BEAKER"                  # same as stim_id
+  )
+
+sim1_reps_with0 <- dplyr::bind_rows(time0_en_reps, sim1_reps) %>%
+  dplyr::arrange(rep, item_id, time)
+
+# ---------------------------
+# SUMMARY OVER REPS (includes time 0)
+# ---------------------------
+sim1_sum_rep <- sim1_reps_with0 %>%
+  dplyr::group_by(listener, time, item_id) %>%
+  dplyr::summarise(
+    mean_post = mean(post, na.rm = TRUE),
+    low       = quantile(post, 0.025, na.rm = TRUE),
+    high      = quantile(post, 0.975, na.rm = TRUE),
+    .groups   = "drop"
+  )
+
+# ---------------------------
+# PLOT
+# ---------------------------
+plot_timecourse_with_reps(
+  df_reps    = sim1_reps_with0,   # <-- includes time 0 now
+  df_summary = sim1_sum_rep,
+  title      = "Simulation 1 – English cohort (with token variability)"
+)
+```
+
+```{r}
+targets_zh <- c("MA_HIGH", "MA_RISE", "MA_DIP", "MA_FALL")
+
+set.seed(789)
+
+# ----------------------------------------
+# Run noisy reps for all Mandarin targets
+# ----------------------------------------
+sim2_all_reps <- purrr::map_dfr(
+  targets_zh,
+  function(tid) {
+    run_noisy_reps(
+      lex            = lex_zh,
+      listener       = listener_zh_highF0,
+      stim_id        = tid,
+      n_reps         = 50,
+      base_sd        = 20,
+      stickiness     = 0.8,
+      obs_noise_sd   = 20,
+      listener_label = "L1 Mandarin (high F0)"
+    ) %>%
+      dplyr::mutate(
+        target_id    = tid,
+        target_label = lex_zh$items[[tid]]$label
+      )
+  }
+)
+
+# ----------------------------------------
+# ADD TIME 0 TO THE REPS (thin lines)
+# ----------------------------------------
+n_items_zh <- length(unique(sim2_all_reps$item_id))
+n_reps_zh  <- length(unique(sim2_all_reps$rep))
+prior_zh   <- 1 / n_items_zh
+
+time0_zh_reps <- expand.grid(
+  target_label = unique(sim2_all_reps$target_label),
+  rep          = seq_len(n_reps_zh),
+  item_id      = unique(sim2_all_reps$item_id),
+  time         = 0,
+  stringsAsFactors = FALSE
+) %>%
+  dplyr::mutate(
+    post      = prior_zh,                      # uniform prior
+    listener  = "L1 Mandarin (high F0)",
+    true_id   = NA_character_,                # fill if you care
+    target_id = NA_character_                 # optional
+  )
+
+sim2_all_reps_with0 <- dplyr::bind_rows(time0_zh_reps, sim2_all_reps) %>%
+  dplyr::arrange(target_label, rep, item_id, time)
+
+# ----------------------------------------
+# SUMMARY OVER REPS (includes time 0)
+# ----------------------------------------
+sim2_all_sum_rep <- sim2_all_reps_with0 %>%
+  dplyr::group_by(listener, target_label, time, item_id) %>%
+  dplyr::summarise(
+    mean_post = mean(post, na.rm = TRUE),
+    low       = quantile(post, 0.025, na.rm = TRUE),
+    high      = quantile(post, 0.975, na.rm = TRUE),
+    .groups   = "drop"
+  )
+
+# ----------------------------------------
+# PLOT
+# ----------------------------------------
+plot_timecourse_with_reps(
+  df_reps    = sim2_all_reps_with0,
+  df_summary = sim2_all_sum_rep,
+  title      = "Simulation 2 – Mandarin tones (all targets, token variability)"
+) +
+  facet_wrap(~ target_label)
+```
+
+```{r}
+# ---------- Italian: token variability ----------
+lex_it <- make_demo_lexicon("italian")
+
+set.seed(321)
+
+sim3_reps <- run_noisy_reps(
+  lex            = lex_it,
+  listener       = listener_it_dur_high,  # your segment-priority version
+  stim_id        = "CALAMO",
+  n_reps         = 100,
+  base_sd        = 0.4,
+  stickiness     = 0.2,
+  obs_noise_sd   = 0.2,
+  listener_label = "L1 Italian (segments > stress)"
+)
+
+# ----------------------------------------
+# ADD TIME 0 TO THE REPS (thin lines)
+# ----------------------------------------
+n_items_it <- length(unique(sim3_reps$item_id))
+n_reps_it  <- length(unique(sim3_reps$rep))
+prior_it   <- 1 / n_items_it
+
+time0_it_reps <- expand.grid(
+  rep     = seq_len(n_reps_it),
+  item_id = unique(sim3_reps$item_id),
+  time    = 0,
+  stringsAsFactors = FALSE
+) %>%
+  dplyr::mutate(
+    post     = prior_it,                          # uniform prior
+    listener = "L1 Italian (segments > stress)",  # same as listener_label
+    true_id  = "CALAMO"                           # same as stim_id
+  )
+
+sim3_reps_with0 <- dplyr::bind_rows(time0_it_reps, sim3_reps) %>%
+  dplyr::arrange(rep, item_id, time)
+
+# ----------------------------------------
+# SUMMARY OVER REPS (includes time 0)
+# ----------------------------------------
+sim3_sum_rep <- sim3_reps_with0 %>%
+  dplyr::group_by(listener, time, item_id) %>%
+  dplyr::summarise(
+    mean_post = mean(post, na.rm = TRUE),
+    low       = quantile(post, 0.025, na.rm = TRUE),
+    high      = quantile(post, 0.975, na.rm = TRUE),
+    .groups   = "drop"
+  )
+
+# ----------------------------------------
+# PLOT
+# ----------------------------------------
+plot_timecourse_with_reps(
+  df_reps    = sim3_reps_with0,
+  df_summary = sim3_sum_rep,
+  title      = "Simulation 3 – Italian stress + segment (token variability)"
+)
+```
+
+
