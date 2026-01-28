@@ -1,17 +1,34 @@
-
 \section{Results}
-Results from the Italian linear model found significant effects for: GoldSmiths emotions ($\beta$ = \livedata{modelsouts}{Italian.gs_emotions.estimate}, \text{SE} = \livedata{modelsouts}{Italian.gs_emotions.std.error}, z = \livedata{modelsouts}{Italian.gs_emotions.statistic}, p \textless{} \livedata{modelsouts}{Italian.gs_emotions.p.value}), indicating that higher musical emotional ratings predict lower sensitivity to Italian geminate contrasts; Working memory ($\beta$ = \livedata{modelsouts}{Italian.mean_working_memory.estimate}, \text{SE} = \livedata{modelsouts}{Italian.mean_working_memory.std.error}, z = \livedata{modelsouts}{Italian.mean_working_memory.statistic}, p \textless{} \livedata{modelsouts}{Italian.mean_working_memory.p.value}), indicating that higher working memory capacity predicts better ability to attend to sensitivity needed for Italian geminate contrasts.
 
-Results from the Japanese linear model found significant effects for: GoldSmiths active engagement ($\beta$ = \livedata{modelsouts}{Japanese.gs_activeeng.estimate}, \text{SE} = \livedata{modelsouts}{Japanese.gs_activeeng.std.error}, z = \livedata{modelsouts}{Japanese.gs_activeeng.statistic}, p \textless{} \livedata{modelsouts}{Japanese.gs_activeeng.p.value}), indicating that higher amounts of musical engagement predict lower sensitivity to Japanese geminate contrasts; Working memory ($\beta$ = \livedata{modelsouts}{Japanese.mean_working_memory.estimate}, \text{SE} = \livedata{modelsouts}{Japanese.mean_working_memory.std.error}, z = \livedata{modelsouts}{Japanese.mean_working_memory.statistic}, p \textless{} \livedata{modelsouts}{Japanese.mean_working_memory.p.value}), indicating that higher working memory capacity predicts higher sensitivity to Japanese geminate contrasts;
-Auditory-motor Rhythm ($\beta$ = \livedata{modelsouts}{Japanese.beat_score.estimate}, \text{SE} = \livedata{modelsouts}{Japanese.beat_score.std.error}, z = \livedata{modelsouts}{Japanese.beat_score.statistic}, p \textless{} \livedata{modelsouts}{Japanese.beat_score.p.value}), indicating that higher productive rhythmic ability predicts greater sensitivity to Japanese geminate contrasts.
+Across all three simulations, continuous cue trajectories and simple listener-specific weighting parameters produced activation patterns that closely resemble established empirical signatures. Because the model updates activation at each time step, the results reveal not only the final lexical outcome but also the temporal evolution of competition.
 
-Results from the Mandarin linear model found significant effects for: GoldSmiths emotions ($\beta$ = \livedata{modelsouts}{Mandarin.gs_emotions.estimate}, \text{SE} = \livedata{modelsouts}{Mandarin.gs_emotions.std.error}, z = \livedata{modelsouts}{Mandarin.gs_emotions.statistic}, p \textless{} \livedata{modelsouts}{Mandarin.gs_emotions.p.value}), indicating that higher musical emotional ratings predict lower sensitivity to Mandarin tone; Musical Ear Test melody ($\beta$ = \livedata{modelsouts}{Mandarin.MET_dprime_melody.estimate}, \text{SE} = \livedata{modelsouts}{Mandarin.MET_dprime_melody.std.error}, z = \livedata{modelsouts}{Mandarin.MET_dprime_melody.statistic}, p \textless{} \livedata{modelsouts}{Mandarin.MET_dprime_melody.p.value}), indicating that higher perceptual sensitivity to musical pitch predicts higher sensitivity to Mandarin tone. 
+The English simulation reproduces the core cohort dynamics reported by \cite{Allopenna1998}. Onset-sharing items (\textit{beaker}, \textit{beetle}) show strong early coactivation, diverging only when later vowel and coda information becomes diagnostic (see Figure \ref{fig:english_mod}). Rhyme competitors such as \textit{speaker} exhibit a smaller activation rise—consistent with empirical findings, though somewhat attenuated due to higher onset/vowel weighting in the listener profile. Despite this reduced magnitude, the relative ordering of competitors is preserved: the target dominates, the cohort shows a sharp but transient rise, the rhyme competitor rises modestly, and the unrelated item remains near floor.
 
-Figure \ref{fig:model} plots the maximal model terms on the y-axis and coefficient estimates on the x-axis. The visualized estimate (point) and confidence interval (error bar) for each language indicates the results from the parsimonious model. In other words, if a term does not have a present coefficient it means that it was not in the parsimonious model of that language.
-
-\begin{figure}[t]
+\begin{figure}[h]
   \centering
-  \includegraphics[width=\linewidth]{SP_24_visuals/Japanese,Italian,_Mandarin_max_models_structure:_parsimonious_effects.pdf}
-  \caption{Each language's parsimonious model output}
-  \label{fig:model}
+  \includegraphics[scale=0.35]{visuals/english_mod.png}
+  \caption{Time-course of lexical activation for English-like forms. Cohort competitors show strong early activation; rhyme competitors exhibit a smaller rise.}
+  \label{fig:english_mod}
+\end{figure}
+
+The Mandarin simulation recovers expected tone-similarity patterns. Rising (T2) and dipping (T3) tones display extended early overlap due to similar initial F0 trajectories, whereas high-level (T1) and falling (T4) tones diverge rapidly. This ordering corroborates previous findings: tones with distinct early pitch shapes separate early, while tones with gradual or rising contours remain competitive longer \cite{MalinsJoanisse2010,ShenFroud2019}. 
+
+With strong F0 weighting, the native-like listener profile produces clear and stable separation across tone categories, closely mirroring empirically observed timing of tone-driven competitor suppression. These results highlight how continuous pitch trajectories alone can drive Mandarin word recognition (see Figure \ref{fig:mandarin_mod}).
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[scale=0.35]{visuals/mandarin_mod.png}
+  \caption{Incremental tone-recognition trajectories for Mandarin listeners with high F0 weighting.}
+  \label{fig:mandarin_mod}
+\end{figure}
+
+The Italian simulation captures the characteristic delayed divergence associated with stress-based recognition. Because duration and F0 cues accumulate across syllables, activation remains relatively undifferentiated early in the word. Once the stressed syllable is reached, the target (\textit{cálamo}) rises sharply, while the stress-matched competitor maintains moderate activation—matching patterns in \cite{SulpizioMcQueen2012, BramlettWiener2025} and related acoustic studies.
+
+Non-stress competitors decline more quickly here than in human data, reflecting the stronger segmental weighting used in the simulation. Nonetheless, the essential pattern is preserved: early ambiguity, divergence at the stressed syllable, and sustained competition between stress-matched items(see Figure \ref{fig:italian_mod}).
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[scale=0.35]{visuals/italian_mod.png}
+  \caption{Incremental activation for Italian stress competitors. Divergence emerges at the stressed syllable.}
+  \label{fig:italian_mod}
 \end{figure}
