@@ -27,7 +27,7 @@ library(ggplot2)
 # - id: internal ID (e.g. "BEAKER", "MA_HIGH")
 # - label: surface form (e.g. "beaker", "mā")
 # - language: "english", "mandarin", "italian", etc.
-# - semantics: arbitrary list (meaning features, gloss, whatever you want)
+# - semantics: arbitrary list (meaning features, gloss)
 # - cues: named list of numeric vectors, each over time
 #         e.g. list(F0 = c(200, 200, 180), DUR = c(80, 90, 100))
 #         all cue vectors should be the same length (T)
@@ -177,7 +177,7 @@ print.lexicon <- function(x, ...) {
 lexicon_to_long <- function(lex) {
   stopifnot(inherits(lex, "lexicon"))
 
-  # we'll use base R to avoid extra dependencies, but you can swap to tibble/dplyr
+  # we'll use base R to avoid extra dependencies, but can swap to tibble/dplyr
   out_list <- lapply(lex$items, function(item) {
     T <- lex_item_time_steps(item)
     if (T == 0L) {
@@ -214,7 +214,7 @@ lexicon_to_long <- function(lex) {
 # Block B: Language-specific lexicons
 # =====================================
 
-# Convenience dispatcher (for your simulations later)
+# Convenience dispatcher
 make_demo_lexicon <- function(language = c("english", "mandarin", "italian"),
                               version  = "default") {
   language <- match.arg(language)
@@ -527,8 +527,7 @@ make_lexicon_italian <- function(version = c("default", "stress_demo")) {
     make_lexicon(
       items = list(calamo, calata, abaco, abate),
       language = "italian",
-      name = "italian_stress_segment_corrected"
-    )
+      name = "italian_stress_segment_corrected")
   }
 }
 ```
@@ -642,7 +641,7 @@ lex_en <- make_demo_lexicon("english")
 lex_zh <- make_demo_lexicon("mandarin")
 lex_it <- make_demo_lexicon("italian")
 
-# Noisy token lexicons (these are what you'll use in the model later)
+# Noisy token lexicons (these are what is used in the model later)
 lex_en_noisy <- make_noisy_lexicon(
   lex_en,
   n_tokens = 20,
@@ -918,7 +917,7 @@ get_cue_matrix_at_time <- function(lex, t) {
   mat
 }
 
-# (Optional) helper if you ever want all cue names
+# (Optional) helper 
 get_lexicon_cue_names <- function(lex) {
   stopifnot(inherits(lex, "lexicon"))
   if (length(lex$items) == 0L) return(character(0))
@@ -1159,7 +1158,6 @@ predict_incremental_posteriors <- function(lex,
 # =====================================
 
 # For now, a "token" is just a reference to a lexical item.
-# (If you want extra trial noise later, we can add it here.)
 prepare_token <- function(lex, item_id, listener) {
   stopifnot(inherits(lex, "lexicon"))
 
@@ -1447,7 +1445,7 @@ sim2_all <- purrr::map_dfr(
       lex        = lex_zh,
       listener   = listener_zh_highF0,  # L1-ish strong pitch listener
       stim_id    = tid,
-      base_sd    = 30,                  # your current setting
+      base_sd    = 30,                 
       stickiness = 0.8
     )
 
@@ -1928,7 +1926,7 @@ time0_zh_reps <- expand.grid(
   dplyr::mutate(
     post      = prior_zh,                      # uniform prior
     listener  = "L1 Mandarin (high F0)",
-    true_id   = NA_character_,                # fill if you care
+    true_id   = NA_character_,                
     target_id = NA_character_                 # optional
   )
 
@@ -1966,7 +1964,7 @@ set.seed(321)
 
 sim3_reps <- run_noisy_reps(
   lex            = lex_it,
-  listener       = listener_it_dur_high,  # your segment-priority version
+  listener       = listener_it_dur_high,
   stim_id        = "CALAMO",
   n_reps         = 100,
   base_sd        = 0.4,
