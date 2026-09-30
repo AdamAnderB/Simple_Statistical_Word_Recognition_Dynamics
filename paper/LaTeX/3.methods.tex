@@ -1,7 +1,7 @@
 \section{Methods}
 Each simulation uses a minimal lexicon containing two contrastive word types. Words are represented as multidimensional Gaussian distributions over relevant acoustic dimensions or approximations. For each dimension, lexical items are defined by a mean, a variance, and a time-course function specifying how that cue evolves across successive time steps. Different simulations draw on distinct acoustic contrasts appropriate for the language under study.
 
-For English, the simulation uses a generic segmental evidence trajectory rather than a single phonetic cue such as VOT. Each word is represented by a continuous acoustic signature that unfolds across its onset, vowel, and coda portions, with diagnostic information increasing as the segmental structure becomes clearer over time. This captures the fact that words like Beaker, Beetle, Speaker, and Carriage differ at multiple points in the acoustic stream, and cannot be placed on a single phonetic dimension. Figure~\ref{fig:english_desc} illustrates these continuous segmental trajectories for the four English items, showing how the onset, vowel, and coda each contribute incrementally to lexical differentiation. Example is modified from \cite{Allopenna1998}.
+For English, the simulation uses an abstract segmental evidence trajectory rather than phonetic cues such as VOT. Each word is represented by a continuous acoustic signature that unfolds across its onset, vowel, and coda portions, with diagnostic information increasing as the segmental structure becomes clearer over time. This captures the fact that words like Beaker, Beetle, Speaker, and Carriage differ at multiple points in the acoustic stream, and cannot be placed on a single phonetic dimension. Figure~\ref{fig:english_desc} illustrates these continuous segmental trajectories for the four English items, showing how the onset, vowel, and coda each contribute incrementally to lexical differentiation. Example is modified from \cite{Allopenna1998}.
 
 \begin{figure}[h]
   \centering
@@ -23,7 +23,7 @@ The Italian stress simulation represents both unique segmental information (like
 
 \begin{figure}[h]
 \centering
-\includegraphics[scale=0.5]{visuals/italian.png}
+\includegraphics[scale=0.35]{visuals/italian.png}
 \caption{Cue trajectories for Italian items across duration, F0, and segmental dimensions, highlighting strong segmental differentiation and the emergence of stress-based prosodic cues over time.}
 \label{fig:italian_desc}
 \end{figure}
@@ -37,14 +37,14 @@ In terms of the modeling architecture, the framework consists of three core comp
   \label{fig:schematic}
 \end{figure}
 
-At each time step $t$, the model receives a slice of acoustic evidence along one or more dimensions, such as VOT, F0, or duration. For each candidate word $w$ and each dimension $d$, the likelihood of observing the current acoustic value is computed as:
+At each time step $t$, the model receives a slice of acoustic evidence along one or more dimensions (e.g. VOT, F0, duration). For each candidate word $w$ and each dimension $d$, the likelihood of observing the current acoustic value is computed as:
 \[
 \ell_{w,d}(t) = P(x_d(t) \mid \mu_{w,d}, \sigma_{w,d}).
 \]
 
 This structure accommodates cues that unfold over time, such as Mandarin tone contours or stress-based duration patterns, and therefore allows the model to integrate prosodic information continuously rather than discretizing cues into segment-aligned categories.
 
-Differences between listener groups are simulated by introducing cue-attention weights that scale the contribution of each dimension. The likelihood for each word is combined across dimensions using the weighting function:
+Differences between listener groups are simulated by introducing cue-attention weights that scale the contribution of each dimension. Listener-specific cue weights and representational precision are manually specified to approximate native-like and non-native profiles reported in prior work, rather than being fit to empirical data in the current simulations. The likelihood for each word is combined across dimensions using the weighting function:
 \[
 \ell_{w}(t) = \prod_d \ell_{w,d}(t)^{\alpha_d}.
 \]
